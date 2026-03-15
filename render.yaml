@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: sistema-estoque
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 2 --timeout 60
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: estoque-db
+          property: connectionString
+
+databases:
+  - name: estoque-db
+    plan: free
+    databaseName: estoque

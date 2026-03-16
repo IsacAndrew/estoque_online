@@ -89,6 +89,11 @@ def inicializar_banco():
                     data_hora TEXT NOT NULL
                 );
             """)
+            # Migração: remove restrição NOT NULL do barcode se ainda existir
+            try:
+                c.execute("ALTER TABLE movimentacoes ALTER COLUMN barcode DROP NOT NULL")
+            except Exception:
+                conn.rollback()
             c.execute("INSERT INTO config VALUES ('nome_empresa','Grupo Multi AS') ON CONFLICT DO NOTHING")
             c.execute("SELECT COUNT(*) FROM catalogo")
             if c.fetchone()[0] == 0:

@@ -477,17 +477,21 @@ def obter_sessoes():
 
 def obter_dados_info(data_ini, data_fim):
     conn = get_conn()
+    p = (data_ini + " 00:00:00", data_fim + " 23:59:59")
     try:
         with conn.cursor() as c:
-            c.execute("SELECT COALESCE(SUM(quantidade),0) FROM movimentacoes WHERE tipo='saida' AND data_hora >= %s AND data_hora < %s",
-                      (data_ini + " 00:00:00", data_fim + " 23:59:59"))
+            sql_sum = "SELECT COALESCE(SUM(quantidade),0) FROM movimentacoes WHERE tipo=%s AND data_hora >= %s AND data_hora < %s"
+            c.execute(sql_sum, ("saida",) + p)
             total_saidas = c.fetchone()[0]
-            c.execute("SELECT COALESCE(SUM(quantidade),0) FROM movimentacoes WHERE tipo='entrada' AND data_hora >= %s AND data_hora < %s",
-                      (data_ini + " 00:00:00", data_fim + " 23:59:59"))
+            c.execute(sql_sum, ("entrada",) + p)
             total_entradas = c.fetchone()[0]
-            c.execute("SELECT cor, SUM(quantidade) as total FROM movimentacoes WHERE tipo='saida' AND data_hora >= %s AND data_hora < %s GROUP BY cor ORDER BY total DESC LIMIT 1",
-                      (data_ini + " 00:00:00", data_fim + " 23:59:59"))
+            sql_top = "SELECT cor, SUM(quantidade) as total FROM movimentacoes WHERE tipo=%s AND data_hora >= %s AND data_hora < %s GROUP BY cor ORDER BY total DESC LIMIT 1"
+            c.execute(sql_top, ("saida",) + p)
             row = c.fetchone()
-            cor_mais_saiu = f"{row[0]} ({row[1]} un.)" if row else "—"
-            c.execute("SELECT cor, SUM(quantidade) as total FROM movimentacoes WHERE tipo='entrada' AND data_hora >= %s AND data_hora < %s GROUP BY cor ORDER BY total DESC LIMIT 1",
-        
+            cor_mais_saiu = (row[0] + " (" + str(row[1]) + " un.)") if row else "—"
+            c.execute(sql_top, ("entrada",) + p)
+            row2 = c.fetchone()
+            cor_mais_entrou = (row2[0] + " (" + str(row2[1]) + " un.)") if row2 else "—"
+        return {"total_saidas": total_saidas, "total_entradas": total_entradas,
+                "cor_mais_saiu": cor_mais_saiu, "cor_mais_entrou": cor_mais_entrou}
+    finall

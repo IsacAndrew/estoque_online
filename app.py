@@ -994,8 +994,11 @@ async function fazerLogin() {{
     const primeiro = document.querySelector('.tab-btn');
     if (primeiro) primeiro.click();
     intervalo = setInterval(atualizarDados, 2000);
-    // Inicia chat polling
-    carregarMensagens();
+    // Inicia chat polling — primeiro carrega silenciosamente para marcar ID atual
+    fetch('/api/mensagens?ultimo_id=0').then(r=>r.json()).then(msgs => {{
+      if (msgs && msgs.length) ultimoMsgId = msgs[msgs.length-1].id;
+      carregarMensagens();
+    }}).catch(()=> carregarMensagens());
     intervaloChat = setInterval(carregarMensagens, 3000);
     // Registra sessão no servidor
     fetch('/api/sessao/registrar', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{nome:usuarioAtual}})}});
@@ -1436,7 +1439,12 @@ async function enviarMensagem() {{
 @app.route("/")
 @app.route("/index.html")
 def index():
-    return gerar_html(), 200, {"Content-Type": "text/html; charset=utf-8"}
+    from flask import make_response
+    resp = make_response(gerar_html())
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 @app.route("/api/estoque")
 def api_estoque():

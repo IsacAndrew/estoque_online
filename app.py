@@ -471,7 +471,7 @@ def obter_sessoes():
             m, s = divmod(rem, 60)
             tempo = f"{h}h {m}m {s}s" if h else (f"{m}m {s}s" if m else f"{s}s")
         except:
-            tempo = ""-""
+            tempo = "N/A"
         resultado.append({"nome": nome, "ultimo_acesso": ultimo, "tempo_conectado": tempo})
     return resultado
 
@@ -488,10 +488,10 @@ def obter_dados_info(data_ini, data_fim):
             sql_top = "SELECT cor, SUM(quantidade) as total FROM movimentacoes WHERE tipo=%s AND data_hora >= %s AND data_hora < %s GROUP BY cor ORDER BY total DESC LIMIT 1"
             c.execute(sql_top, ("saida",) + p)
             row = c.fetchone()
-            cor_mais_saiu = (row[0] + " (" + str(row[1]) + " un.)") if row else ""-""
+            cor_mais_saiu = (row[0] + " (" + str(row[1]) + " un.)") if row else "N/A"
             c.execute(sql_top, ("entrada",) + p)
             row2 = c.fetchone()
-            cor_mais_entrou = (row2[0] + " (" + str(row2[1]) + " un.)") if row2 else ""-""
+            cor_mais_entrou = (row2[0] + " (" + str(row2[1]) + " un.)") if row2 else "N/A"
         return {"total_saidas": total_saidas, "total_entradas": total_entradas,
                 "cor_mais_saiu": cor_mais_saiu, "cor_mais_entrou": cor_mais_entrou}
     

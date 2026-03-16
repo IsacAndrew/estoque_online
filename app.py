@@ -270,6 +270,7 @@ def limpar_historico(nome_admin, senha):
 
 def ajustar_quantidade_direta(modelo, cor, nova_qtd, usuario=""):
     nova_qtd = int(nova_qtd)
+    print(f"[AJUSTE] usuario={usuario} modelo={modelo} cor={cor} nova_qtd={nova_qtd}", flush=True)
     if nova_qtd < 0:
         return {"sucesso": False, "mensagem": "Quantidade não pode ser negativa."}
     conn = get_conn()
@@ -278,10 +279,13 @@ def ajustar_quantidade_direta(modelo, cor, nova_qtd, usuario=""):
             c.execute("SELECT quantidade FROM estoque WHERE modelo=%s AND cor=%s", (modelo, cor))
             row = c.fetchone()
             if not row:
+                print(f"[AJUSTE] ERRO: produto não encontrado", flush=True)
                 return {"sucesso": False, "mensagem": "Produto não encontrado."}
             atual = row[0]
+            print(f"[AJUSTE] atual={atual} -> novo={nova_qtd}", flush=True)
             diff = nova_qtd - atual
             if diff == 0:
+                print(f"[AJUSTE] sem alteração, retornando atual", flush=True)
                 return {"sucesso": True, "quantidade": atual}
             tipo = "entrada" if diff > 0 else "saida"
             c.execute("UPDATE estoque SET quantidade=%s WHERE modelo=%s AND cor=%s", (nova_qtd, modelo, cor))
@@ -290,13 +294,17 @@ def ajustar_quantidade_direta(modelo, cor, nova_qtd, usuario=""):
                 (modelo, cor, tipo, abs(diff), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), usuario)
             )
         conn.commit()
-        # Verifica alerta após ajuste
+        print(f"[AJUSTE] sucesso: {modelo}/{cor} {atual}->{nova_qtd}", flush=True)
         alerta = None
         if nova_qtd == 0:
             alerta = f"⚠️ Atenção! {modelo} da cor {cor} está zerado"
         elif nova_qtd <= 10:
             alerta = f"⚠️ Atenção! {modelo} da cor {cor} está com estoque baixo"
         return {"sucesso": True, "quantidade": nova_qtd, "tipo": tipo, "diff": abs(diff), "alerta": alerta}
+    except Exception as e:
+        print(f"[AJUSTE] EXCEÇÃO: {e}", flush=True)
+        conn.rollback()
+        return {"sucesso": False, "mensagem": str(e)}
     finally:
         release_conn(conn)
 

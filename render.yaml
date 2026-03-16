@@ -3,7 +3,7 @@ services:
     name: sistema-estoque
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --workers 2 --timeout 60
+    startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 60
     envVars:
       - key: DATABASE_URL
         value: postgresql://estoque_db_96cp_user:vL1QK3WLaswiPdGM6BzZrw5s8gGFHnCf@dpg-d6rklu4hg0os73en64rg-a/estoque_db_96cp

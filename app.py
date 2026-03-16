@@ -946,6 +946,9 @@ let usuarioAtual = null, tipoUsuario = null;
 let intervalo = null, intervaloInfos = null, intervaloChat = null;
 let ultimoMsgId = 0;
 let _alertasAnteriores = {{}};
+// Mapa de cards alterados recentemente: chave -> timestamp
+// atualizarDados ignora esses cards por 3 segundos após um ajuste
+const _cardsBloqueados = {{}};
 
 // ── Login / Logout ──────────────────────────────────────────────
 async function fazerLogin() {{
@@ -1043,11 +1046,15 @@ function mostrarAba(id, btn) {{
 async function atualizarDados() {{
   if (!usuarioAtual) return;
   try {{
+    const agora = Date.now();
     const dados = await fetch('/api/estoque').then(r=>r.json());
     for (const [modelo, cores] of Object.entries(dados)) {{
       let tot_m = 0;
       for (const [cor, qtd] of Object.entries(cores)) {{
         tot_m += qtd;
+        const chave = modelo + '|' + cor;
+        // Ignora cards alterados nos últimos 3 segundos (evita sobrescrever digitação do usuário)
+        if (_cardsBloqueados[chave] && agora - _cardsBloqueados[chave] < 3000) continue;
         const card = document.getElementById('card-'+(modelo+'-'+cor).replace(/ /g,'_'));
         if (!card) continue;
         card.className = 'card '+(qtd>25?'card-ok':qtd>10?'card-baixo':'card-zero');
@@ -1108,6 +1115,8 @@ function editarQtd(spanEl) {{
 }}
 
 async function enviarAjuste(modelo, cor, nova_qtd) {{
+  // Bloqueia este card por 3s para que atualizarDados não sobrescreva o valor
+  _cardsBloqueados[modelo + '|' + cor] = Date.now();
   const d = await fetch('/api/ajuste_direto', {{
     method: 'POST', headers: {{'Content-Type': 'application/json'}},
     body: JSON.stringify({{modelo, cor, quantidade: nova_qtd, usuario: usuarioAtual}})

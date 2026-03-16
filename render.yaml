@@ -6,9 +6,9 @@ services:
     startCommand: gunicorn app:app --workers 2 --timeout 60
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: estoque-db
-          property: connectionString
+        value: postgresql://estoque_db_96cp_user:vL1QK3WLaswiPdGM6BzZrw5s8gGFHnCf@dpg-d6rklu4hg0os73en64rg-a/estoque_db_96cp
+      - key: PYTHON_VERSION
+        value: 3.11.9
 
 databases:
   - name: estoque-db

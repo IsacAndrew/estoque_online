@@ -2,6 +2,7 @@ services:
   - type: web
     name: sistema-estoque
     runtime: python
+    pythonVersion: "3.11.9"
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --workers 2 --timeout 60
     envVars:

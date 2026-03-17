@@ -28,6 +28,11 @@ def release_conn(conn):
 CATALOGO_INICIAL = {
     "Baby Look":        {"cores": ["Preto", "Off-White"], "emoji": "👚"},
     "Body Manga Curta": {"cores": ["Preto", "Off-White", "Marrom", "Azul", "Vermelho"], "emoji": "👕"},
+    "Body Gola Quadrada": {"cores": ["Preto", "Off-White", "Marrom", "Azul", "Vermelho"], "emoji": "👘"},
+    "Body Manga Curta": {"cores": ["Preto", "Off-White", "Marrom", "Azul", "Vermelho"], "emoji": "👚"},
+    "Body Gola Alta": {"cores": ["Preto", "Off-White", "Marrom", "Azul", "Vermelho"], "emoji": "🩱"},
+    "Mula Manca": {"cores": ["Preto", "Off-White", "Marrom", "Azul", "Vermelho"], "emoji": "👜"},
+    "Baby Tee": {"cores": ["Preto", "Off-White", "Marrom", "Azul", "Vermelho"], "emoji": "👔"}
 }
 
 EMOJIS = ["👚","👗","🩱","👘","👕","🧣","🎀","👙","👖","🧥","👔","🥻","🩲","🧦","👒","👜"]
@@ -89,11 +94,6 @@ def inicializar_banco():
                     data_hora TEXT NOT NULL
                 );
             """)
-            # Migração: remove restrição NOT NULL do barcode se ainda existir
-            try:
-                c.execute("ALTER TABLE movimentacoes ALTER COLUMN barcode DROP NOT NULL")
-            except Exception:
-                conn.rollback()
             c.execute("INSERT INTO config VALUES ('nome_empresa','Grupo Multi AS') ON CONFLICT DO NOTHING")
             c.execute("SELECT COUNT(*) FROM catalogo")
             if c.fetchone()[0] == 0:
@@ -453,10 +453,6 @@ def obter_sessoes():
     conn = get_conn()
     try:
         with conn.cursor() as c:
-            # Remove sessões inativas há mais de 30 segundos (perdeu conexão/fechou browser)
-            c.execute("""DELETE FROM sessoes WHERE ultimo_acesso < to_char(
-                NOW() - INTERVAL '30 seconds', 'YYYY-MM-DD HH24:MI:SS')""")
-            conn.commit()
             c.execute("SELECT nome, ultimo_acesso, login_em FROM sessoes ORDER BY nome")
             rows = c.fetchall()
     finally:
@@ -471,39 +467,38 @@ def obter_sessoes():
             m, s = divmod(rem, 60)
             tempo = f"{h}h {m}m {s}s" if h else (f"{m}m {s}s" if m else f"{s}s")
         except:
-            tempo = "N/A"
+            tempo = "—"
         resultado.append({"nome": nome, "ultimo_acesso": ultimo, "tempo_conectado": tempo})
     return resultado
 
-def obter_dados_info(data_ini, data_fim):
+def obter_dados_info(data):
     conn = get_conn()
-    p = (data_ini + " 00:00:00", data_fim + " 23:59:59")
     try:
         with conn.cursor() as c:
-            sql_sum = "SELECT COALESCE(SUM(quantidade),0) FROM movimentacoes WHERE tipo=%s AND data_hora >= %s AND data_hora < %s"
-            c.execute(sql_sum, ("saida",) + p)
+            c.execute("SELECT COUNT(*) FROM movimentacoes WHERE tipo='saida' AND data_hora LIKE %s", (f"{data}%",))
             total_saidas = c.fetchone()[0]
-            c.execute(sql_sum, ("entrada",) + p)
+            c.execute("SELECT COUNT(*) FROM movimentacoes WHERE tipo='entrada' AND data_hora LIKE %s", (f"{data}%",))
             total_entradas = c.fetchone()[0]
-            sql_top = "SELECT cor, SUM(quantidade) as total FROM movimentacoes WHERE tipo=%s AND data_hora >= %s AND data_hora < %s GROUP BY cor ORDER BY total DESC LIMIT 1"
-            c.execute(sql_top, ("saida",) + p)
+            c.execute("""SELECT cor, SUM(quantidade) as total FROM movimentacoes
+                         WHERE tipo='saida' AND data_hora LIKE %s GROUP BY cor ORDER BY total DESC LIMIT 1""",
+                      (f"{data}%",))
             row = c.fetchone()
-            cor_mais_saiu = (row[0] + " (" + str(row[1]) + " un.)") if row else "N/A"
-            c.execute(sql_top, ("entrada",) + p)
-            row2 = c.fetchone()
-            cor_mais_entrou = (row2[0] + " (" + str(row2[1]) + " un.)") if row2 else "N/A"
-        return {"total_saidas": total_saidas, "total_entradas": total_entradas,
-                "cor_mais_saiu": cor_mais_saiu, "cor_mais_entrou": cor_mais_entrou}
+            cor_mais_saiu = f"{row[0]} ({row[1]} un.)" if row else "—"
+        return {
+            "total_saidas": total_saidas,
+            "total_entradas": total_entradas,
+            "cor_mais_saiu": cor_mais_saiu,
+        }
     finally:
         release_conn(conn)
 
-def obter_saidas_modelo_cor(data_ini, data_fim, modelo, cor):
+def obter_saidas_modelo_cor(data, modelo, cor):
     conn = get_conn()
-    p = (data_ini + " 00:00:00", data_fim + " 23:59:59")
     try:
         with conn.cursor() as c:
-            sql = "SELECT COALESCE(SUM(quantidade),0) FROM movimentacoes WHERE tipo='saida' AND data_hora >= %s AND data_hora < %s AND LOWER(modelo)=LOWER(%s) AND LOWER(cor)=LOWER(%s)"
-            c.execute(sql, p + (modelo, cor))
+            c.execute("""SELECT COALESCE(SUM(quantidade),0) FROM movimentacoes
+                         WHERE tipo='saida' AND data_hora LIKE %s AND LOWER(modelo)=LOWER(%s) AND LOWER(cor)=LOWER(%s)""",
+                      (f"{data}%", modelo, cor))
             return c.fetchone()[0]
     finally:
         release_conn(conn)
@@ -514,33 +509,6 @@ def obter_mensagens(ultimo_id=0):
         with conn.cursor() as c:
             c.execute("SELECT id,usuario,texto,data_hora FROM mensagens WHERE id>%s ORDER BY id ASC", (ultimo_id,))
             return [{"id": r[0], "usuario": r[1], "texto": r[2], "data_hora": r[3]} for r in c.fetchall()]
-    finally:
-        release_conn(conn)
-
-def apagar_mensagem(msg_id, usuario, tipo_usuario):
-    if tipo_usuario not in ("administrador", "programador"):
-        return {"sucesso": False, "mensagem": "Sem permissão."}
-    conn = get_conn()
-    try:
-        with conn.cursor() as c:
-            aviso = f"🤖 [MENSAGEM APAGADA POR {usuario.upper()}]"
-            c.execute("UPDATE mensagens SET texto=%s, usuario='sistema' WHERE id=%s", (aviso, msg_id))
-            if c.rowcount == 0:
-                return {"sucesso": False, "mensagem": "Mensagem não encontrada."}
-        conn.commit()
-        return {"sucesso": True}
-    finally:
-        release_conn(conn)
-
-def limpar_mensagens(usuario, tipo_usuario):
-    if tipo_usuario not in ("administrador", "programador"):
-        return {"sucesso": False, "mensagem": "Sem permissão."}
-    conn = get_conn()
-    try:
-        with conn.cursor() as c:
-            c.execute("DELETE FROM mensagens")
-        conn.commit()
-        return {"sucesso": True, "mensagem": "Chat limpo."}
     finally:
         release_conn(conn)
 
@@ -576,7 +544,7 @@ def gerar_html():
         if not lista:
             return '<span class="al-vazio">Nenhum produto.</span>'
         return "".join(
-            f'<span class="al-tag {cls}">{x["modelo"]} "-" {x["cor"]}'
+            f'<span class="al-tag {cls}">{x["modelo"]} — {x["cor"]}'
             + (f' ({x["qtd"]} un.)' if x["qtd"] > 0 else '') + '</span>'
             for x in lista
         )
@@ -619,7 +587,7 @@ def gerar_html():
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Sistema de Estoque "-" {nome_emp}</title>
+<title>Sistema de Estoque — {nome_emp}</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:'Segoe UI',Arial,sans-serif;background:#f0f2f5;color:#333}}
@@ -641,18 +609,14 @@ header h1{{font-size:1.6rem;font-weight:800}}
 .usuario-badge{{background:rgba(255,255,255,.15);color:white;padding:5px 12px;border-radius:20px;font-size:.82rem;border:1px solid rgba(255,255,255,.3)}}
 .logout-btn{{background:rgba(255,255,255,.1);color:white;border:1px solid rgba(255,255,255,.3);padding:5px 12px;border-radius:8px;cursor:pointer;font-size:.82rem}}
 .logout-btn:hover{{background:rgba(255,255,255,.2)}}
-.abas-principais{{max-width:100%;margin:16px auto 0;padding:0 20px;display:flex;gap:8px;flex-wrap:wrap}}
+.abas-principais{{max-width:1200px;margin:16px auto 0;padding:0 20px;display:flex;gap:8px;flex-wrap:wrap}}
 .aba-principal-btn{{padding:10px 20px;border-radius:8px 8px 0 0;cursor:pointer;font-size:.9rem;font-weight:600;border:none;background:#e0e0e0;color:#555}}
 .aba-principal-btn.active{{background:#1a2f5a;color:white}}
 .aba-principal-conteudo{{display:none}}.aba-principal-conteudo.ativa{{display:block}}
-/* Layout de 3 colunas */
-.main-layout{{display:grid;grid-template-columns:160px 1fr 160px;gap:12px;padding:0 12px 20px;max-width:1400px;margin:0 auto}}
-.center-content{{min-width:0}}
-/* Painéis laterais finos */
-.side-panel{{background:white;border-radius:12px;padding:12px 10px;box-shadow:0 2px 8px rgba(0,0,0,.07);height:fit-content;position:sticky;top:12px}}
-.side-titulo{{font-size:.75rem;font-weight:700;color:#555;margin-bottom:8px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}}
-.side-lista{{display:flex;flex-direction:column;gap:4px;max-height:calc(100vh - 160px);overflow-y:auto}}
-.side-lista .al-tag{{font-size:.7rem;padding:3px 7px;border-radius:6px;border:1px solid;word-break:break-word}}
+.container{{max-width:1200px;margin:0 auto;padding:0 20px 20px}}
+.al-painel{{display:flex;gap:14px;margin-bottom:20px}}
+.al-bloco{{flex:1;background:white;border-radius:12px;padding:14px 16px;box-shadow:0 2px 8px rgba(0,0,0,.07)}}
+.al-titulo{{font-size:.8rem;font-weight:700;color:#555;margin-bottom:10px;display:flex;align-items:center;gap:6px}}
 .al-cnt{{border-radius:20px;padding:1px 7px;font-size:.72rem;font-weight:700;margin-left:4px}}
 .al-cnt-zero{{background:#fde8e8;color:#b91c1c}}.al-cnt-baixo{{background:#fef3cd;color:#92400e}}
 .al-lista{{display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow-y:auto}}
@@ -776,12 +740,8 @@ header h1{{font-size:1.6rem;font-weight:800}}
 .novo-produto-form{{background:#f8f9fb;border:1px solid #e2e6ea;border-radius:10px;padding:16px;margin-bottom:20px}}
 .novo-produto-form h4{{color:#1a2f5a;font-size:.9rem;margin-bottom:12px}}
 footer{{text-align:center;padding:20px;color:#aaa;font-size:.78rem}}
-@media(max-width:1024px){{
-  .side-panel{{display:none}}
-  .main-layout{{grid-template-columns:1fr}}
-}}
 @media(max-width:600px){{
-  header,.abas-principais{{flex-direction:column;gap:10px;text-align:center}}
+  header,.al-painel,.abas-principais{{flex-direction:column;gap:10px;text-align:center}}
   .cards-grid{{grid-template-columns:repeat(auto-fit,minmax(100px,1fr))}}
 }}
 </style>
@@ -793,8 +753,8 @@ footer{{text-align:center;padding:20px;color:#aaa;font-size:.78rem}}
 <div id="tela-login">
   <div class="login-box">
     <div style="font-size:2.4rem;margin-bottom:10px">📦</div>
-    <h2>{nome_emp}</h2>
-    <p id="login-empresa">Sistema de Estoque</p>
+    <h2>Sistema de Estoque</h2>
+    <p id="login-empresa">{nome_emp}</p>
     <input id="login-usuario" class="login-input" type="text" placeholder="Usuário"
            onkeydown="if(event.key==='Enter')document.getElementById('login-senha').focus()"/>
     <input id="login-senha" class="login-input" type="password" placeholder="Senha"
@@ -818,201 +778,179 @@ footer{{text-align:center;padding:20px;color:#aaa;font-size:.78rem}}
 <div class="abas-principais">
   <button class="aba-principal-btn active" onclick="trocarAba('estoque',this)">📦 Estoque</button>
   <button class="aba-principal-btn" id="btn-historico" style="display:none" onclick="trocarAba('historico',this)">📋 Histórico</button>
-  <button class="aba-principal-btn" id="btn-dados" style="display:none" onclick="trocarAba('dados',this)">📊 Dados</button>
-  <button class="aba-principal-btn" id="btn-admin" style="display:none" onclick="trocarAba('admin',this)">⚙️ Registros</button>
+  <button class="aba-principal-btn" id="btn-dados" style="display:none" onclick="trocarAba('dados',this)">📊 Dados e Informações</button>
+  <button class="aba-principal-btn" id="btn-admin" style="display:none" onclick="trocarAba('admin',this)">⚙️ Login e Registros</button>
   <button class="aba-principal-btn" onclick="trocarAba('obs',this)">💬 Observações</button>
   <button class="aba-principal-btn" id="btn-infos" style="display:none" onclick="trocarAba('infos',this)">🛠️ INFOS</button>
 </div>
 
-<div class="main-layout">
+<div class="container">
 
-  <!-- PAINEL ESQUERDO: ZERADOS -->
-  <div class="side-panel side-panel-left">
-    <div class="side-titulo">🔴 Zerados <span class="al-cnt al-cnt-zero" id="cnt-zero">{cnt_zero}</span></div>
-    <div class="side-lista" id="al-lista-zero">{_tags_al(alertas["zerados"],"al-zero")}</div>
+  <!-- ABA ESTOQUE -->
+  <div id="aba-estoque" class="aba-principal-conteudo ativa" style="padding-top:16px">
+    <div class="al-painel">
+      <div class="al-bloco">
+        <div class="al-titulo">🔴 Zerados <span class="al-cnt al-cnt-zero" id="cnt-zero">{cnt_zero}</span></div>
+        <div class="al-lista" id="al-lista-zero">{_tags_al(alertas["zerados"],"al-zero")}</div>
+      </div>
+      <div class="al-bloco">
+        <div class="al-titulo">🟡 Estoque baixo (1–10 un.) <span class="al-cnt al-cnt-baixo" id="cnt-baixo">{cnt_baixo}</span></div>
+        <div class="al-lista" id="al-lista-baixo">{_tags_al(alertas["baixos"],"al-baixo")}</div>
+      </div>
+    </div>
+    <div class="tabs-bar">{abas_html}</div>
+    <div id="conteudo-abas">{conteudo_html}</div>
+    <div class="legenda">
+      <div class="leg-item"><div class="leg-dot" style="background:#4caf50"></div> Normal (&gt;25)</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#ffc107"></div> Baixo (11–25)</div>
+      <div class="leg-item"><div class="leg-dot" style="background:#f44336"></div> Crítico (0–10)</div>
+    </div>
   </div>
 
-  <!-- CENTRO -->
-  <div class="center-content">
-
-    <!-- ABA ESTOQUE -->
-    <div id="aba-estoque" class="aba-principal-conteudo ativa" style="padding-top:16px">
-      <div class="tabs-bar">{abas_html}</div>
-      <div id="conteudo-abas">{conteudo_html}</div>
-      <div class="legenda">
-        <div class="leg-item"><div class="leg-dot" style="background:#4caf50"></div> Normal (&gt;25)</div>
-        <div class="leg-item"><div class="leg-dot" style="background:#ffc107"></div> Baixo (11–25)</div>
-        <div class="leg-item"><div class="leg-dot" style="background:#f44336"></div> Crítico (0–10)</div>
+  <!-- ABA HISTÓRICO -->
+  <div id="aba-historico" class="aba-principal-conteudo" style="padding-top:16px">
+    <div class="historico-wrap">
+      <div class="hist-topo">
+        <h3>📋 Histórico de Movimentações</h3>
+        <button id="btn-toggle-filtro" class="hist-btn" onclick="toggleFiltroHist()">🔍 Filtro</button>
+        <button id="btn-limpar-hist" class="hist-btn hist-btn-danger" style="display:none" onclick="limparHistoricoWeb()">🗑 Limpar</button>
       </div>
-    </div>
-
-    <!-- ABA HISTÓRICO -->
-    <div id="aba-historico" class="aba-principal-conteudo" style="padding-top:16px">
-      <div class="historico-wrap">
-        <div class="hist-topo">
-          <h3>📋 Histórico de Movimentações</h3>
-          <button id="btn-toggle-filtro" class="hist-btn" onclick="toggleFiltroHist()">🔍 Filtro</button>
-          <button id="btn-limpar-hist" class="hist-btn hist-btn-danger" style="display:none" onclick="limparHistoricoWeb()">🗑 Limpar</button>
+      <div id="filtro-painel" class="filtro-painel">
+        <div class="filtro-grid">
+          <div class="filtro-campo"><label>Usuário</label><input id="f-usuario" oninput="agendarFiltro()"/></div>
+          <div class="filtro-campo"><label>Data/Hora</label><input id="f-data_hora" placeholder="ex: 2025-06" oninput="agendarFiltro()"/></div>
+          <div class="filtro-campo"><label>Modelo</label><input id="f-modelo" oninput="agendarFiltro()"/></div>
+          <div class="filtro-campo"><label>Cor</label><input id="f-cor" oninput="agendarFiltro()"/></div>
+          <div class="filtro-campo"><label>Tipo</label><input id="f-tipo" placeholder="entrada / saida" oninput="agendarFiltro()"/></div>
+          <div class="filtro-campo"><label>Qtd</label><input id="f-quantidade" oninput="agendarFiltro()"/></div>
         </div>
-        <div id="filtro-painel" class="filtro-painel">
-          <div class="filtro-grid">
-            <div class="filtro-campo"><label>Usuário</label><input id="f-usuario" oninput="agendarFiltro()"/></div>
-            <div class="filtro-campo"><label>Data/Hora</label><input id="f-data_hora" placeholder="ex: 2025-06" oninput="agendarFiltro()"/></div>
-            <div class="filtro-campo"><label>Modelo</label><input id="f-modelo" oninput="agendarFiltro()"/></div>
-            <div class="filtro-campo"><label>Cor</label><input id="f-cor" oninput="agendarFiltro()"/></div>
-            <div class="filtro-campo"><label>Tipo</label><input id="f-tipo" placeholder="entrada / saida" oninput="agendarFiltro()"/></div>
-            <div class="filtro-campo"><label>Qtd</label><input id="f-quantidade" oninput="agendarFiltro()"/></div>
-          </div>
-          <div style="text-align:right;margin-top:10px">
-            <button onclick="limparFiltros()" style="background:none;border:none;color:#999;font-size:.78rem;cursor:pointer;text-decoration:underline">✕ limpar filtros</button>
-          </div>
-        </div>
-        <table class="hist-table">
-          <thead><tr><th>Data/Hora</th><th>Usuário</th><th>Modelo</th><th>Cor</th><th>Tipo</th><th>Qtd</th></tr></thead>
-          <tbody id="hist-tbody"></tbody>
-        </table>
-        <div id="hist-paginacao" style="display:flex;justify-content:center;align-items:center;gap:4px;padding:16px 0;flex-wrap:wrap"></div>
-      </div>
-    </div>
-
-    <!-- ABA DADOS E INFORMAÇÕES -->
-    <div id="aba-dados" class="aba-principal-conteudo" style="padding-top:16px">
-      <div class="dados-wrap">
-        <h3>📊 Dados e Informações</h3>
-        <div class="dados-form">
-          <div class="dados-grupo">
-            <label class="dados-label">Data inicial</label>
-            <input id="dados-data-ini" class="dados-input" type="date"/>
-          </div>
-          <div class="dados-grupo">
-            <label class="dados-label">Data final</label>
-            <input id="dados-data-fim" class="dados-input" type="date"/>
-          </div>
-          <button class="dados-btn" onclick="carregarDados()">🔍 Consultar</button>
-        </div>
-        <div class="dados-stats" id="dados-stats" style="display:none">
-          <div class="stat-card">
-            <div class="stat-val" id="stat-saidas">"-"</div>
-            <div class="stat-lbl">Total de baixas (saídas)</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-val" id="stat-entradas">"-"</div>
-            <div class="stat-lbl">Total de entradas</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-val" id="stat-cor-saiu" style="font-size:1rem;padding-top:6px">"-"</div>
-            <div class="stat-lbl">Cor que mais saiu</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-val" id="stat-cor-entrou" style="font-size:1rem;padding-top:6px">"-"</div>
-            <div class="stat-lbl">Cor que mais entrou</div>
-          </div>
-        </div>
-        <hr class="dados-sep">
-        <h3>🔎 Saídas por Modelo/Cor</h3>
-        <div class="dados-form">
-          <div class="dados-grupo">
-            <label class="dados-label">Data inicial</label>
-            <input id="mc-data-ini" class="dados-input" type="date"/>
-          </div>
-          <div class="dados-grupo">
-            <label class="dados-label">Data final</label>
-            <input id="mc-data-fim" class="dados-input" type="date"/>
-          </div>
-          <div class="dados-grupo">
-            <label class="dados-label">Modelo</label>
-            <input id="mc-modelo" class="dados-input" type="text" placeholder="ex: Baby Look"/>
-          </div>
-          <div class="dados-grupo">
-            <label class="dados-label">Cor</label>
-            <input id="mc-cor" class="dados-input" type="text" placeholder="ex: Preto"/>
-          </div>
-          <button class="dados-btn" onclick="carregarSaidasMC()">🔍 Consultar</button>
-        </div>
-        <div id="mc-resultado" style="font-size:.95rem;color:#1a2f5a;font-weight:600;min-height:24px"></div>
-        <hr class="dados-sep">
-        <h3>➕ Registrar Novo Produto</h3>
-        <div class="novo-produto-form">
-          <div class="dados-form">
-            <div class="dados-grupo">
-              <label class="dados-label">Nome do modelo</label>
-              <input id="np-modelo" class="dados-input" type="text" placeholder="ex: Camiseta"/>
-            </div>
-            <div class="dados-grupo">
-              <label class="dados-label">Cores (separadas por vírgula)</label>
-              <input id="np-cores" class="dados-input" type="text" placeholder="ex: Preto, Branco, Azul" style="min-width:220px"/>
-            </div>
-            <button class="dados-btn" onclick="registrarNovoProduto()">➕ Registrar</button>
-          </div>
-          <div id="np-feedback" style="font-size:.85rem;font-weight:600;min-height:20px"></div>
+        <div style="text-align:right;margin-top:10px">
+          <button onclick="limparFiltros()" style="background:none;border:none;color:#999;font-size:.78rem;cursor:pointer;text-decoration:underline">✕ limpar filtros</button>
         </div>
       </div>
+      <table class="hist-table">
+        <thead><tr><th>Data/Hora</th><th>Usuário</th><th>Modelo</th><th>Cor</th><th>Tipo</th><th>Qtd</th></tr></thead>
+        <tbody id="hist-tbody"></tbody>
+      </table>
+      <div id="hist-paginacao" style="display:flex;justify-content:center;align-items:center;gap:4px;padding:16px 0;flex-wrap:wrap"></div>
     </div>
-
-    <!-- ABA ADMIN -->
-    <div id="aba-admin" class="aba-principal-conteudo" style="padding-top:16px">
-      <div class="admin-wrap">
-        <h3 id="adm-titulo">⚙️ Cadastrar Usuário</h3>
-        <div id="admin-feedback" style="display:none" class="admin-feedback"></div>
-        <div class="admin-form">
-          <input id="adm-editando" type="hidden" value=""/>
-          <div class="admin-grupo"><label class="admin-label">Nome</label>
-            <input id="adm-nome" class="admin-input" type="text" placeholder="Nome do usuário"/></div>
-          <div class="admin-grupo">
-            <label class="admin-label">Senha <span id="adm-senha-hint" style="font-weight:400;color:#aaa"></span></label>
-            <input id="adm-senha" class="admin-input" type="password" placeholder="Senha"/></div>
-          <div class="admin-grupo"><label class="admin-label">Tipo</label>
-            <select id="adm-tipo" class="admin-input" style="min-width:140px">
-              <option value="colaborador">Colaborador</option>
-              <option value="administrador">Administrador</option>
-              <option value="programador" id="opt-programador" style="display:none">Programador</option>
-            </select></div>
-          <button class="admin-btn" onclick="salvarUsuario()">💾 Salvar</button>
-          <button class="admin-btn sec" onclick="cancelarEdicao()">✕</button>
-        </div>
-        <table class="usuarios-lista">
-          <thead><tr><th>Usuário</th><th>Tipo</th><th>Ações</th></tr></thead>
-          <tbody id="usuarios-lista"><tr><td colspan="3" style="color:#aaa">Carregando...</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ABA OBSERVAÇÕES -->
-    <div id="aba-obs" class="aba-principal-conteudo" style="padding-top:16px">
-      <div class="chat-wrap">
-        <div class="chat-topo" id="chat-topo-admin" style="display:none;padding:8px 16px;border-bottom:1px solid #eee;text-align:right">
-          <button class="hist-btn hist-btn-danger" onclick="limparChatWeb()" style="font-size:.78rem">🗑 Limpar tudo</button>
-        </div>
-        <div class="chat-msgs" id="chat-msgs"></div>
-        <div class="chat-input-row">
-          <input id="chat-input" class="chat-input" type="text" placeholder="Digite uma mensagem..."
-                 onkeydown="if(event.key==='Enter')enviarMensagem()"/>
-          <button class="chat-send-btn" onclick="enviarMensagem()">Enviar</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ABA INFOS -->
-    <div id="aba-infos" class="aba-principal-conteudo" style="padding-top:16px">
-      <div class="infos-wrap">
-        <h3>🛠️ INFOS "-" Usuários Online</h3>
-        <table class="infos-table">
-          <thead><tr><th>Usuário</th><th>Tempo conectado</th><th>Último acesso</th></tr></thead>
-          <tbody id="infos-tbody"><tr><td colspan="3" style="color:#aaa">Carregando...</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-  </div><!-- /center-content -->
-
-  <!-- PAINEL DIREITO: ESTOQUE BAIXO -->
-  <div class="side-panel side-panel-right">
-    <div class="side-titulo">🟡 Baixo <span class="al-cnt al-cnt-baixo" id="cnt-baixo">{cnt_baixo}</span></div>
-    <div class="side-lista" id="al-lista-baixo">{_tags_al(alertas["baixos"],"al-baixo")}</div>
   </div>
 
-</div><!-- /main-layout -->
-<footer>Sistema de Estoque "-" {nome_emp}</footer>
+  <!-- ABA DADOS E INFORMAÇÕES -->
+  <div id="aba-dados" class="aba-principal-conteudo" style="padding-top:16px">
+    <div class="dados-wrap">
+      <h3>📊 Dados e Informações</h3>
+      <div class="dados-form">
+        <div class="dados-grupo">
+          <label class="dados-label">Selecione a data</label>
+          <input id="dados-data" class="dados-input" type="date"/>
+        </div>
+        <button class="dados-btn" onclick="carregarDados()">🔍 Consultar</button>
+      </div>
+      <div class="dados-stats" id="dados-stats" style="display:none">
+        <div class="stat-card">
+          <div class="stat-val" id="stat-saidas">—</div>
+          <div class="stat-lbl">Baixas (saídas) no dia</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="stat-entradas">—</div>
+          <div class="stat-lbl">Entradas no dia</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="stat-cor" style="font-size:1rem;padding-top:6px">—</div>
+          <div class="stat-lbl">Cor que mais saiu</div>
+        </div>
+      </div>
+      <hr class="dados-sep">
+      <h3>🔎 Saídas por Modelo/Cor</h3>
+      <div class="dados-form">
+        <div class="dados-grupo">
+          <label class="dados-label">Data</label>
+          <input id="mc-data" class="dados-input" type="date"/>
+        </div>
+        <div class="dados-grupo">
+          <label class="dados-label">Modelo</label>
+          <input id="mc-modelo" class="dados-input" type="text" placeholder="ex: Baby Look"/>
+        </div>
+        <div class="dados-grupo">
+          <label class="dados-label">Cor</label>
+          <input id="mc-cor" class="dados-input" type="text" placeholder="ex: Preto"/>
+        </div>
+        <button class="dados-btn" onclick="carregarSaidasMC()">🔍 Consultar</button>
+      </div>
+      <div id="mc-resultado" style="font-size:.95rem;color:#1a2f5a;font-weight:600;min-height:24px"></div>
+      <hr class="dados-sep">
+      <h3>➕ Registrar Novo Produto</h3>
+      <div class="novo-produto-form">
+        <div class="dados-form">
+          <div class="dados-grupo">
+            <label class="dados-label">Nome do modelo</label>
+            <input id="np-modelo" class="dados-input" type="text" placeholder="ex: Camiseta"/>
+          </div>
+          <div class="dados-grupo">
+            <label class="dados-label">Cores (separadas por vírgula)</label>
+            <input id="np-cores" class="dados-input" type="text" placeholder="ex: Preto, Branco, Azul" style="min-width:220px"/>
+          </div>
+          <button class="dados-btn" onclick="registrarNovoProduto()">➕ Registrar</button>
+        </div>
+        <div id="np-feedback" style="font-size:.85rem;font-weight:600;min-height:20px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ABA ADMIN -->
+  <div id="aba-admin" class="aba-principal-conteudo" style="padding-top:16px">
+    <div class="admin-wrap">
+      <h3 id="adm-titulo">⚙️ Cadastrar Usuário</h3>
+      <div id="admin-feedback" style="display:none" class="admin-feedback"></div>
+      <div class="admin-form">
+        <input id="adm-editando" type="hidden" value=""/>
+        <div class="admin-grupo"><label class="admin-label">Nome</label>
+          <input id="adm-nome" class="admin-input" type="text" placeholder="Nome do usuário"/></div>
+        <div class="admin-grupo">
+          <label class="admin-label">Senha <span id="adm-senha-hint" style="font-weight:400;color:#aaa"></span></label>
+          <input id="adm-senha" class="admin-input" type="password" placeholder="Senha"/></div>
+        <div class="admin-grupo"><label class="admin-label">Tipo</label>
+          <select id="adm-tipo" class="admin-input" style="min-width:140px">
+            <option value="colaborador">Colaborador</option>
+            <option value="administrador">Administrador</option>
+            <option value="programador" id="opt-programador" style="display:none">Programador</option>
+          </select></div>
+        <button class="admin-btn" onclick="salvarUsuario()">💾 Salvar</button>
+        <button class="admin-btn sec" onclick="cancelarEdicao()">✕</button>
+      </div>
+      <table class="usuarios-lista">
+        <thead><tr><th>Usuário</th><th>Tipo</th><th>Ações</th></tr></thead>
+        <tbody id="usuarios-lista"><tr><td colspan="3" style="color:#aaa">Carregando...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ABA OBSERVAÇÕES -->
+  <div id="aba-obs" class="aba-principal-conteudo" style="padding-top:16px">
+    <div class="chat-wrap">
+      <div class="chat-msgs" id="chat-msgs"></div>
+      <div class="chat-input-row">
+        <input id="chat-input" class="chat-input" type="text" placeholder="Digite uma mensagem..."
+               onkeydown="if(event.key==='Enter')enviarMensagem()"/>
+        <button class="chat-send-btn" onclick="enviarMensagem()">Enviar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ABA INFOS -->
+  <div id="aba-infos" class="aba-principal-conteudo" style="padding-top:16px">
+    <div class="infos-wrap">
+      <h3>🛠️ INFOS — Usuários Online</h3>
+      <table class="infos-table">
+        <thead><tr><th>Usuário</th><th>Tempo conectado</th><th>Último acesso</th></tr></thead>
+        <tbody id="infos-tbody"><tr><td colspan="3" style="color:#aaa">Carregando...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+<footer>Sistema de Estoque — {nome_emp}</footer>
 </div>
 
 <script>
@@ -1044,7 +982,6 @@ async function fazerLogin() {{
       document.getElementById('btn-dados').style.display = 'inline-block';
       document.getElementById('btn-admin').style.display = 'inline-block';
       document.getElementById('btn-limpar-hist').style.display = 'inline-block';
-      document.getElementById('chat-topo-admin').style.display = 'block';
       const s = document.getElementById('nome-empresa-txt');
       s.style.cssText = 'cursor:pointer;border-bottom:2px dashed rgba(255,255,255,.4)';
       s.title = 'Clique para editar'; s.onclick = editarNome;
@@ -1062,40 +999,18 @@ async function fazerLogin() {{
     const primeiro = document.querySelector('.tab-btn');
     if (primeiro) primeiro.click();
     intervalo = setInterval(atualizarDados, 2000);
-    // Carrega histórico silenciosamente ao logar (sem notificações)
+    // Inicia chat polling — primeiro carrega silenciosamente para marcar ID atual
     fetch('/api/mensagens?ultimo_id=0').then(r=>r.json()).then(msgs => {{
-      if (msgs && msgs.length) {{
-        ultimoMsgId = msgs[msgs.length-1].id;
-        // Renderiza histórico sem notificar
-        const container = document.getElementById('chat-msgs');
-        const podeApagar = tipoUsuario === 'administrador' || tipoUsuario === 'programador';
-        msgs.forEach(msg => {{
-          const minha = msg.usuario.toLowerCase() === usuarioAtual.toLowerCase();
-          const isSistema = msg.usuario === 'sistema';
-          const dtUTC = new Date(msg.data_hora.replace(' ', 'T') + 'Z');
-          const hora = dtUTC.toLocaleTimeString('pt-BR', {{hour:'2-digit', minute:'2-digit'}});
-          const div = document.createElement('div');
-          if (isSistema) {{
-            div.style.cssText = 'text-align:center;padding:4px 0';
-            div.innerHTML = `<span style="font-size:.72rem;color:#999;font-family:monospace;letter-spacing:.5px">${{msg.texto}}</span>`;
-          }} else {{
-            div.className = 'chat-msg ' + (minha ? 'minha' : 'outra');
-            const btnApagar = podeApagar ? `<button onclick="apagarMensagem(${{msg.id}},this)" style="background:none;border:none;cursor:pointer;font-size:.65rem;opacity:.5;margin-left:6px" title="Apagar">🗑</button>` : '';
-            div.innerHTML = (!minha ? `<div class="chat-autor">${{msg.usuario}}</div>` : '')
-              + `<div>${{msg.texto}}${{btnApagar}}</div><div class="chat-hora">${{hora}}</div>`;
-          }}
-          container.appendChild(div);
-        }});
-        container.scrollTop = container.scrollHeight;
-      }}
-    }}).catch(()=>{{}});
+      if (msgs && msgs.length) ultimoMsgId = msgs[msgs.length-1].id;
+      carregarMensagens();
+    }}).catch(()=> carregarMensagens());
     intervaloChat = setInterval(carregarMensagens, 3000);
     // Registra sessão no servidor
     fetch('/api/sessao/registrar', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{nome:usuarioAtual}})}});
-    // Keepalive da sessão a cada 15s (timeout é 30s)
+    // Keepalive da sessão
     setInterval(()=>{{
       if(usuarioAtual) fetch('/api/sessao/ping',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{nome:usuarioAtual}})}});
-    }}, 15000);
+    }}, 10000);
   }} else {{
     document.getElementById('login-erro').textContent = d.mensagem || 'Erro ao entrar.';
   }}
@@ -1169,7 +1084,7 @@ async function atualizarDados() {{
     document.getElementById('hdr-hora').textContent = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR');
     const al = await fetch('/api/alertas').then(r=>r.json());
     const tags = (lista, cls) => lista.length
-      ? lista.map(x=>`<span class="al-tag ${{cls}}">${{x.modelo}} "-" ${{x.cor}}${{x.qtd>0?' ('+x.qtd+' un.)':''}}</span>`).join('')
+      ? lista.map(x=>`<span class="al-tag ${{cls}}">${{x.modelo}} — ${{x.cor}}${{x.qtd>0?' ('+x.qtd+' un.)':''}}</span>`).join('')
       : '<span class="al-vazio">Nenhum produto.</span>';
     document.getElementById('al-lista-zero').innerHTML  = tags(al.zerados, 'al-zero');
     document.getElementById('al-lista-baixo').innerHTML = tags(al.baixos,  'al-baixo');
@@ -1178,31 +1093,13 @@ async function atualizarDados() {{
   }} catch(e) {{}}
 }}
 
-// ── Ajuste de card com debounce "-" garante todos os cliques ──────
-const _pendente = {{}}; // chave -> {{qtd, timer}}
-
+// ── Ajuste via botões ← → ──────────────────────────────────────
 async function ajustarCard(cardEl, delta) {{
   const span = cardEl.querySelector('.card-qtd');
   if (!span || span.tagName !== 'SPAN') return;
-  const modelo = cardEl.dataset.modelo;
-  const cor    = cardEl.dataset.cor;
-  const chave  = modelo + '|' + cor;
-
-  // Atualiza visualmente de imediato
-  const atual = parseInt(span.textContent) || 0;
-  const novo  = Math.max(0, atual + delta);
-  span.textContent = novo;
-
-  // Acumula e agenda envio após 300ms de inatividade
-  if (!_pendente[chave]) _pendente[chave] = {{qtd: novo, timer: null}};
-  else _pendente[chave].qtd = novo;
-
-  clearTimeout(_pendente[chave].timer);
-  _pendente[chave].timer = setTimeout(async () => {{
-    const qtdFinal = _pendente[chave].qtd;
-    delete _pendente[chave];
-    await enviarAjuste(modelo, cor, qtdFinal);
-  }}, 300);
+  const nova = Math.max(0, (parseInt(span.textContent) || 0) + delta);
+  span.textContent = nova;
+  await enviarAjuste(cardEl.dataset.modelo, cardEl.dataset.cor, nova);
 }}
 
 function editarQtd(spanEl) {{
@@ -1250,7 +1147,7 @@ async function enviarAjuste(modelo, cor, nova_qtd) {{
     }}
   }}
   if (d.alerta) mostrarNotif(d.alerta, 'alerta');
-  // Libera o bloqueio após confirmar "-" polling pode voltar a atualizar normalmente
+  // Libera o bloqueio após confirmar — polling pode voltar a atualizar normalmente
   delete _cardsBloqueados[chave];
 }}
 
@@ -1277,7 +1174,7 @@ async function carregarUsuarios() {{
     const icone = isProg?'💻':isAdm?'👑':'👤';
     const label = `<span class="${{cls}}">${{icone}} ${{u.tipo.charAt(0).toUpperCase()+u.tipo.slice(1)}}</span>`;
     const acoes = ehEu
-      ? '<span style="color:#aaa;font-size:.75rem">"-" conta atual "-"</span>'
+      ? '<span style="color:#aaa;font-size:.75rem">— conta atual —</span>'
       : `<button class="usr-btn usr-btn-edit" onclick="editarUsuario('${{u.nome}}','${{u.tipo}}')">✏️ Editar</button>`
         +`<button class="usr-btn usr-btn-del"  onclick="removerUsuario('${{u.nome}}')">🗑️ Remover</button>`;
     return `<tr><td><strong>${{u.nome}}</strong></td><td>${{label}}</td><td>${{acoes}}</td></tr>`;
@@ -1343,7 +1240,7 @@ function editarNome() {{
   .then(r=>r.json()).then(d=>{{
     if (d.sucesso) {{
       document.getElementById('nome-empresa-txt').textContent = novo.trim();
-      document.title = 'Sistema de Estoque "-" '+novo.trim();
+      document.title = 'Sistema de Estoque — '+novo.trim();
     }} else alert('Erro: '+d.mensagem);
   }});
 }}
@@ -1375,7 +1272,7 @@ async function carregarHistorico(pagina) {{
   }} else {{
     tbody.innerHTML = dados.registros.map(h => {{
       const cor = h.tipo === 'entrada' ? '#2e7d32' : '#c62828';
-      return `<tr><td>${{h.data_hora}}</td><td>${{h.usuario||'"-"'}}</td><td>${{h.modelo}}</td><td>${{h.cor}}</td>
+      return `<tr><td>${{h.data_hora}}</td><td>${{h.usuario||'—'}}</td><td>${{h.modelo}}</td><td>${{h.cor}}</td>
         <td style="color:${{cor}};font-weight:600">${{h.tipo==='entrada'?'➕':'➖'}} ${{h.tipo.charAt(0).toUpperCase()+h.tipo.slice(1)}}</td>
         <td style="font-weight:700">${{h.quantidade}}</td></tr>`;
     }}).join('');
@@ -1445,27 +1342,24 @@ setInterval(() => {{
 
 // ── Dados e Informações ────────────────────────────────────────
 async function carregarDados() {{
-  const ini = document.getElementById('dados-data-ini').value;
-  const fim = document.getElementById('dados-data-fim').value;
-  if (!ini || !fim) {{ alert('Selecione data inicial e final.'); return; }}
-  const d = await fetch(`/api/dados_info?data_ini=${{ini}}&data_fim=${{fim}}`).then(r=>r.json()).catch(()=>null);
+  const data = document.getElementById('dados-data').value;
+  if (!data) {{ alert('Selecione uma data.'); return; }}
+  const d = await fetch(`/api/dados_info?data=${{data}}`).then(r=>r.json()).catch(()=>null);
   if (!d) return;
   document.getElementById('dados-stats').style.display = 'grid';
-  document.getElementById('stat-saidas').textContent     = d.total_saidas;
-  document.getElementById('stat-entradas').textContent   = d.total_entradas;
-  document.getElementById('stat-cor-saiu').textContent   = d.cor_mais_saiu;
-  document.getElementById('stat-cor-entrou').textContent = d.cor_mais_entrou;
+  document.getElementById('stat-saidas').textContent   = d.total_saidas;
+  document.getElementById('stat-entradas').textContent = d.total_entradas;
+  document.getElementById('stat-cor').textContent      = d.cor_mais_saiu;
 }}
 
 async function carregarSaidasMC() {{
-  const ini   = document.getElementById('mc-data-ini').value;
-  const fim   = document.getElementById('mc-data-fim').value;
+  const data   = document.getElementById('mc-data').value;
   const modelo = document.getElementById('mc-modelo').value.trim();
   const cor    = document.getElementById('mc-cor').value.trim();
-  if (!ini||!fim||!modelo||!cor) {{ alert('Preencha todos os campos.'); return; }}
-  const d = await fetch(`/api/saidas_mc?data_ini=${{ini}}&data_fim=${{fim}}&modelo=${{encodeURIComponent(modelo)}}&cor=${{encodeURIComponent(cor)}}`).then(r=>r.json()).catch(()=>null);
+  if (!data||!modelo||!cor) {{ alert('Preencha data, modelo e cor.'); return; }}
+  const d = await fetch(`/api/saidas_mc?data=${{data}}&modelo=${{encodeURIComponent(modelo)}}&cor=${{encodeURIComponent(cor)}}`).then(r=>r.json()).catch(()=>null);
   if (d===null) return;
-  document.getElementById('mc-resultado').textContent = `${{modelo}} "-" ${{cor}}: ${{d.quantidade}} saída(s) entre ${{ini}} e ${{fim}}`;
+  document.getElementById('mc-resultado').textContent = `${{modelo}} — ${{cor}}: ${{d.quantidade}} saída(s) em ${{data}}`;
 }}
 
 async function registrarNovoProduto() {{
@@ -1508,69 +1402,27 @@ async function carregarMensagens() {{
 
   const container = document.getElementById('chat-msgs');
   const estaEmbaixo = container.scrollHeight - container.scrollTop <= container.clientHeight + 60;
-  const podeApagar = tipoUsuario === 'administrador' || tipoUsuario === 'programador';
 
   dados.forEach(msg => {{
     ultimoMsgId = Math.max(ultimoMsgId, msg.id);
-    const minha = msg.usuario.toLowerCase() === usuarioAtual.toLowerCase();
-    const isSistema = msg.usuario === 'sistema';
-
-    // Converte horário UTC para horário local do browser
-    const dtUTC = new Date(msg.data_hora.replace(' ', 'T') + 'Z');
-    const hora = dtUTC.toLocaleTimeString('pt-BR', {{hour:'2-digit', minute:'2-digit'}});
-
     const div = document.createElement('div');
-
-    if (isSistema) {{
-      // Mensagem de sistema (apagada) "-" estilo robótico
-      div.style.cssText = 'text-align:center;padding:4px 0';
-      div.innerHTML = `<span style="font-size:.72rem;color:#999;font-family:monospace;letter-spacing:.5px">${{msg.texto}}</span>`;
-    }} else {{
-      div.className = 'chat-msg ' + (minha ? 'minha' : 'outra');
-      const btnApagar = podeApagar
-        ? `<button onclick="apagarMensagem(${{msg.id}},this)" style="background:none;border:none;cursor:pointer;font-size:.65rem;opacity:.5;margin-left:6px" title="Apagar">🗑</button>`
-        : '';
-      div.innerHTML = (!minha ? `<div class="chat-autor">${{msg.usuario}}</div>` : '')
-        + `<div>${{msg.texto}}${{btnApagar}}</div>`
-        + `<div class="chat-hora">${{hora}}</div>`;
-    }}
+    const minha = msg.usuario.toLowerCase() === usuarioAtual.toLowerCase();
+    div.className = 'chat-msg ' + (minha ? 'minha' : 'outra');
+    div.innerHTML = (!minha ? `<div class="chat-autor">${{msg.usuario}}</div>` : '')
+      + `<div>${{msg.texto}}</div><div class="chat-hora">${{msg.data_hora.slice(11,16)}}</div>`;
     container.appendChild(div);
 
-    // Notifica apenas usuários que já estavam online (ultimoMsgId era 0 antes do login)
-    if (!minha && !isSistema) {{
+    // Notificação para mensagens de outros usuários
+    if (!minha) {{
       const abaObs = document.getElementById('aba-obs');
-      if (!abaObs.classList.contains('ativa')) {{
+      const visivel = abaObs && abaObs.classList.contains('ativa');
+      if (!visivel) {{
         mostrarNotif(`📩 Nova mensagem de ${{msg.usuario}}`, 'msg');
       }}
     }}
   }});
 
   if (estaEmbaixo) container.scrollTop = container.scrollHeight;
-}}
-
-async function apagarMensagem(id, btn) {{
-  const d = await fetch('/api/mensagens/apagar', {{
-    method:'POST', headers:{{'Content-Type':'application/json'}},
-    body: JSON.stringify({{id, usuario: usuarioAtual, tipo_usuario: tipoUsuario}})
-  }}).then(r=>r.json()).catch(()=>({{}}));
-  if (d.sucesso) {{
-    // Recarrega o chat do zero para refletir a mudança
-    document.getElementById('chat-msgs').innerHTML = '';
-    ultimoMsgId = 0;
-    await carregarMensagens();
-  }}
-}}
-
-async function limparChatWeb() {{
-  if (!confirm('Apagar todas as mensagens?')) return;
-  const d = await fetch('/api/mensagens/limpar', {{
-    method:'POST', headers:{{'Content-Type':'application/json'}},
-    body: JSON.stringify({{usuario: usuarioAtual, tipo_usuario: tipoUsuario}})
-  }}).then(r=>r.json()).catch(()=>({{}}));
-  if (d.sucesso) {{
-    document.getElementById('chat-msgs').innerHTML = '';
-    ultimoMsgId = 0;
-  }}
 }}
 
 async function enviarMensagem() {{
@@ -1688,19 +1540,17 @@ def api_salvar_config():
 
 @app.route("/api/dados_info")
 def api_dados_info():
-    data_ini = request.args.get("data_ini","")
-    data_fim = request.args.get("data_fim","")
-    if not data_ini or not data_fim:
-        return jsonify({"erro": "data_ini e data_fim obrigatórias"})
-    return jsonify(obter_dados_info(data_ini, data_fim))
+    data = request.args.get("data","")
+    if not data:
+        return jsonify({"erro": "data obrigatória"})
+    return jsonify(obter_dados_info(data))
 
 @app.route("/api/saidas_mc")
 def api_saidas_mc():
-    data_ini = request.args.get("data_ini","")
-    data_fim = request.args.get("data_fim","")
-    modelo   = request.args.get("modelo","")
-    cor      = request.args.get("cor","")
-    return jsonify({"quantidade": obter_saidas_modelo_cor(data_ini, data_fim, modelo, cor)})
+    data   = request.args.get("data","")
+    modelo = request.args.get("modelo","")
+    cor    = request.args.get("cor","")
+    return jsonify({"quantidade": obter_saidas_modelo_cor(data, modelo, cor)})
 
 @app.route("/api/produto_novo", methods=["POST"])
 def api_produto_novo():
@@ -1731,16 +1581,6 @@ def api_sessao_remover():
 @app.route("/api/infos")
 def api_infos():
     return jsonify(obter_sessoes())
-
-@app.route("/api/mensagens/apagar", methods=["POST"])
-def api_apagar_mensagem():
-    dados = request.get_json(force=True) or {}
-    return jsonify(apagar_mensagem(dados.get("id"), dados.get("usuario",""), dados.get("tipo_usuario","")))
-
-@app.route("/api/mensagens/limpar", methods=["POST"])
-def api_limpar_mensagens():
-    dados = request.get_json(force=True) or {}
-    return jsonify(limpar_mensagens(dados.get("usuario",""), dados.get("tipo_usuario","")))
 
 @app.route("/api/mensagens", methods=["GET"])
 def api_get_mensagens():

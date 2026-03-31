@@ -11,6 +11,13 @@ from psycopg2 import pool
 app = Flask(__name__)
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
+# Inicializa o banco sempre que o app subir (Render / Gunicorn)
+try:
+    inicializar_banco()
+    print("Banco inicializado com sucesso")
+except Exception as e:
+    print("Erro ao inicializar banco:", e)
+
 _pool = None
 
 def get_pool():
@@ -1597,6 +1604,6 @@ def api_post_mensagem():
 # =============================================================================
 
 if __name__ == "__main__":
-    inicializar_banco()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+

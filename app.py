@@ -12,11 +12,11 @@ app = Flask(__name__)
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # Inicializa o banco sempre que o app subir (Render / Gunicorn)
-#try:
-#    inicializar_banco()
-#    print("Banco inicializado com sucesso")
-#except Exception as e:
-#    print("Erro ao inicializar banco:", e)
+try:
+    inicializar_banco()
+    print("Banco inicializado com sucesso")
+except Exception as e:
+    print("Erro ao inicializar banco:", e)
 
 _pool = None
 

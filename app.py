@@ -40,14 +40,14 @@ CATALOGO_INICIAL = {
     "Blusinha Regata": {"cores": ["Vinho", "Marrom", "Azul Marinho", "Preto", "Vermelho", "Azul Band.", "Amarelo Band.", "Verde Band."], "emoji": "👗"}, 
     "Body Gola Quadrada": {"cores": ["Marrom", "Azul", "Cinza", "Preto"], "emoji": "🧥"},
     "Body Manga Curta": {"cores": ["Vinho", "Marrom", "Azul Marinho", "Branco", "Cinza", "Preto"], "emoji": "👕"},
-    "Body Regata": {"cores": ["Marrom", "Branco", "Preto", "CInza", "Azul Marinho"], "emoji": "🩱"},
+    "Body Regata": {"cores": ["Marrom", "Branco", "Preto", "Cinza", "Azul Marinho"], "emoji": "🩱"},
     "Costa Nua": {"cores": ["Vermelho", "Azul Bebê", "Marrom", "Verde", "Preto"], "emoji": "🩱"},
     "Cropped Manga Longa": {"cores": ["Marrom", "Preto"], "emoji": "👔"},
     "Body Gola Alta": {"cores": ["Preto", "Bege", "Marrom", "Cinza"], "emoji": "🧥"},
     "Mula Manca": {"cores": ["Preto", "Vermelho", "Azul Bebê", "Rosa", "Marrom"], "emoji": "👚"},
     "Top Academia": {"cores": ["Marrom", "Cinza", "Branco", "Azul Marinho", "Lilás", "Preto", "Amarelo", "Bege", "Azul Bebê", "Vermelho", "Vinho"], "emoji": "👕"},
     "Top Tube Faixa": {"cores": ["Preto", "Azul Marinho", "Marrom", "Branco", "Cinza"], "emoji": "👙"},
-    "Blusinha T-Shirt": {"cores": ["Vinho", "Azul Marinho", "Marrom", "Verde", "Preta"], "emoji": "🎀"},
+    "Blusinha T-Shirt": {"cores": ["Vinho", "Azul Marinho", "Marrom", "Verde", "Preto"], "emoji": "🎀"},
 }
 
 EMOJIS = ["👚","👗","🩱","👘","👕","🧣","🎀","👙","👖","🧥","👔","🥻","🩲","🧦","👒","👜"]
